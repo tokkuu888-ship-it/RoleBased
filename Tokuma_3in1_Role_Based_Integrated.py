@@ -916,11 +916,12 @@ else:
                         corr = mc_df[num_cols].corr()
                         fig_hm = px.imshow(
                             corr,
-                            text_auto=".2f",
+                            text_auto=True,
                             aspect="auto",
                             color_continuous_scale="RdBu_r",
                             title="Parameter & output correlation heatmap",
                         )
+                        fig_hm.update_traces(texttemplate="%{z:.2f}")
                         st.plotly_chart(fig_hm, use_container_width=True)
 
                     if morris_wp is not None:
