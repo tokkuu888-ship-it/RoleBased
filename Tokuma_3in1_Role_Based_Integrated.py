@@ -231,20 +231,15 @@ class IrrigationScheduler:
     def calculate_irrigation_schedule(self, crop_water_demand, soil_moisture, 
                                       climate_forecast, water_availability):
         """Calculate optimal irrigation timing and amount based on drivers"""
-        
-        # Calculate net irrigation requirement
-        net_irrigation = max(0, crop_water_demand - soil_moisture)
-        
-        # Adjust based on climate forecast
-        if climate_forecast.get('rainfall_expected', 0) > 10:
-            net_irrigation *= 0.7  # Reduce if rain expected
-        
-        # Adjust based on water availability
-        if water_availability < net_irrigation:
-            net_irrigation = water_availability * 0.9  # Use 90% of available
-        
-        # Calculate timing based on crop stress indicators
-        stress_level = self._calculate_crop_stress(soil_moisture, crop_water_demand)
+
+        rainfall_expected = climate_forecast.get('rainfall_expected', 0)
+        effective_soil_moisture = soil_moisture + rainfall_expected
+        net_irrigation = max(0, crop_water_demand - effective_soil_moisture)
+        net_irrigation = min(net_irrigation, water_availability)
+
+        stress_level = self._calculate_crop_stress(
+            effective_soil_moisture, crop_water_demand
+        )
         
         if stress_level > 0.7:
             timing = 'immediate'
@@ -265,6 +260,8 @@ class IrrigationScheduler:
             'flow_rate': flow_rate,
             'stress_level': stress_level,
             'soil_moisture_current': soil_moisture,
+            'rainfall_expected_mm': rainfall_expected,
+            'water_availability_mm': water_availability,
             'crop_water_demand': crop_water_demand
         }
         
@@ -1047,7 +1044,18 @@ with phase3:
             )
             db_conn.commit()
 
-        if 'current_schedule' in st.session_state:
+        schedule_inputs_changed = (
+            'current_schedule' in st.session_state
+            and (
+                st.session_state.current_schedule.get('soil_moisture_current') != soil_moisture
+                or st.session_state.current_schedule.get('rainfall_expected_mm') != expected_rainfall
+                or st.session_state.current_schedule.get('water_availability_mm') != available_water
+            )
+        )
+        if schedule_inputs_changed:
+            st.info("Scheduling inputs changed. Generate a new schedule to update the details.")
+
+        if 'current_schedule' in st.session_state and not schedule_inputs_changed:
             schedule = st.session_state.current_schedule
             st.success("✅ Irrigation schedule generated successfully!")
 
