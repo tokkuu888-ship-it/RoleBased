@@ -233,13 +233,12 @@ class IrrigationScheduler:
         """Calculate optimal irrigation timing and amount based on drivers"""
 
         rainfall_expected = climate_forecast.get('rainfall_expected', 0)
-        effective_soil_moisture = soil_moisture + rainfall_expected
-        net_irrigation = max(0, crop_water_demand - effective_soil_moisture)
+        net_irrigation = max(0, crop_water_demand - soil_moisture)
+        if rainfall_expected > 10:
+            net_irrigation *= 0.7
         net_irrigation = min(net_irrigation, water_availability)
 
-        stress_level = self._calculate_crop_stress(
-            effective_soil_moisture, crop_water_demand
-        )
+        stress_level = self._calculate_crop_stress(soil_moisture, crop_water_demand)
         
         if stress_level > 0.7:
             timing = 'immediate'
