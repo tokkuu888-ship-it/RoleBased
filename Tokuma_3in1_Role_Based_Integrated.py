@@ -511,6 +511,23 @@ else:
     st.title("🌾 Tokuma 3-in-1: Field Operations Portal")
     st.success("Welcome. You can access irrigation scheduling and field operations only.")
 
+st.markdown(
+    """
+    <style>
+    div[data-testid="stTabs"] div[data-baseweb="tab-list"] {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: thin;
+    }
+    div[data-testid="stTabs"] button[data-baseweb="tab"] {
+        flex: 1 0 180px;
+        white-space: nowrap;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Role-specific sidebar controls. Field accounts do not receive research/admin controls.
 country = "Ethiopia"
 target_year = 2050
