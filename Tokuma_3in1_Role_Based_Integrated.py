@@ -130,7 +130,8 @@ class SMSCommunicationModule:
     def format_irrigation_instruction_sms(self, instruction):
         """Format irrigation instruction as SMS message"""
         message = f"TOKUMA IRR: Apply {instruction['irrigation_amount']}mm water. "
-        message += f"Duration: {instruction['duration_minutes']}min. "
+        duration = instruction["duration_minutes"]
+        message += f"Duration: {duration:.1f}min. " if duration is not None else "Duration: not calculated. "
         message += f"Flow: {instruction['flow_rate']}L/s. "
         message += f"Time: {instruction['irrigation_timing']}. "
         message += f"ID: {instruction['request_id'][:8]}"
@@ -223,56 +224,78 @@ class HardwareControlInterface:
 
 
 class IrrigationScheduler:
-    """NEW: Irrigation scheduling phase after drivers prediction"""
+    """Estimate irrigation need from field-scale soil-water inputs."""
     
     def __init__(self):
         self.schedule_history = []
     
-    def calculate_irrigation_schedule(self, crop_water_demand, soil_moisture, 
-                                      climate_forecast, water_availability):
-        """Calculate optimal irrigation timing and amount based on drivers"""
+    def calculate_irrigation_schedule(
+        self,
+        soil_water_capacity,
+        soil_moisture,
+        rainfall_expected,
+        water_availability,
+        field_area_m2,
+        flow_rate_lps,
+    ):
+        """Estimate the soil-water deficit and cap it by available irrigation supply."""
+        inputs = (
+            soil_water_capacity,
+            soil_moisture,
+            rainfall_expected,
+            water_availability,
+            field_area_m2,
+            flow_rate_lps,
+        )
+        if not all(np.isfinite(value) for value in inputs):
+            raise ValueError("Irrigation inputs must be finite numbers.")
+        if any(value < 0 for value in inputs[:-1]):
+            raise ValueError("Soil water, rainfall, supply, and field area cannot be negative.")
+        if flow_rate_lps <= 0:
+            raise ValueError("Flow rate must be greater than zero.")
 
-        rainfall_expected = climate_forecast.get('rainfall_expected', 0)
-        net_irrigation = max(0, crop_water_demand - soil_moisture)
-        if rainfall_expected > 10:
-            net_irrigation *= 0.7
-        net_irrigation = min(net_irrigation, water_availability)
+        soil_water_deficit = max(
+            0.0, soil_water_capacity - soil_moisture - rainfall_expected
+        )
+        net_irrigation = min(soil_water_deficit, water_availability)
+        deficit_fraction = (
+            min(1.0, soil_water_deficit / soil_water_capacity)
+            if soil_water_capacity > 0
+            else 0.0
+        )
 
-        stress_level = self._calculate_crop_stress(soil_moisture, crop_water_demand)
-        
-        if stress_level > 0.7:
-            timing = 'immediate'
-        elif stress_level > 0.4:
-            timing = 'within_24h'
+        if net_irrigation == 0:
+            timing = "no irrigation needed"
+        elif deficit_fraction > 0.7:
+            timing = "immediate"
+        elif deficit_fraction > 0.4:
+            timing = "within_24h"
         else:
-            timing = 'within_48h'
-        
-        # Calculate duration based on flow rate
-        flow_rate = 2.5  # L/s default
-        duration_minutes = (net_irrigation * 10) / flow_rate  # Simplified calculation
+            timing = "within_48h"
+
+        # A millimeter over one square meter is one liter.
+        duration_minutes = (
+            net_irrigation * field_area_m2 / (flow_rate_lps * 60)
+            if net_irrigation > 0 and field_area_m2 > 0
+            else 0.0 if net_irrigation == 0 else None
+        )
         
         schedule = {
             'timestamp': datetime.now().isoformat(),
             'net_irrigation_mm': net_irrigation,
             'timing': timing,
             'duration_minutes': duration_minutes,
-            'flow_rate': flow_rate,
-            'stress_level': stress_level,
+            'flow_rate': flow_rate_lps,
+            'stress_level': deficit_fraction,
             'soil_moisture_current': soil_moisture,
             'rainfall_expected_mm': rainfall_expected,
             'water_availability_mm': water_availability,
-            'crop_water_demand': crop_water_demand
+            'soil_water_capacity_mm': soil_water_capacity,
+            'field_area_m2': field_area_m2,
         }
         
         self.schedule_history.append(schedule)
         return schedule
-    
-    def _calculate_crop_stress(self, soil_moisture, crop_water_demand):
-        """Calculate crop stress level (0-1 scale)"""
-        if crop_water_demand == 0:
-            return 0.0
-        stress = 1 - (soil_moisture / crop_water_demand)
-        return max(0, min(1, stress))
 
 
 # ------------------------------
@@ -1013,39 +1036,64 @@ if is_admin:
 # ==================== PHASE 3: IRRIGATION SCHEDULING (NEW) ====================
 with phase3:
     st.subheader("💧 Phase 3: Irrigation Scheduling")
-    st.markdown("NEW: Calculate optimal irrigation timing and amount based on predicted drivers")
+    st.markdown("Estimate root-zone water deficit and irrigation needs from field measurements.")
 
     if st.session_state.get('simulation_run', False):
-        results = st.session_state.simulation_results
-        ag_demand = results['ag_demand']
-        wp = results['wp']
-        yld = results['yld']
-
         # Initialize irrigation scheduler
         if 'irrigation_scheduler' not in st.session_state:
             st.session_state.irrigation_scheduler = IrrigationScheduler()
 
         scheduler = st.session_state.irrigation_scheduler
 
-        st.write("**Input Parameters for Scheduling**")
+        st.write("**Field Soil-Water and Irrigation Inputs**")
         col1, col2, col3 = st.columns(3)
         with col1:
-            soil_moisture = st.number_input("Current Soil Moisture (mm)", value=30.0, min_value=0.0, max_value=200.0)
+            soil_water_capacity = st.number_input(
+                "Target Soil Water Capacity (mm)",
+                value=100.0,
+                min_value=0.0,
+                key="phase3_soil_water_capacity",
+                help="Target water level in the root zone, such as field capacity.",
+            )
+            soil_moisture = st.number_input(
+                "Current Soil Moisture (mm)",
+                value=30.0,
+                min_value=0.0,
+                key="phase3_soil_moisture",
+            )
         with col2:
-            expected_rainfall = st.number_input("Expected Rainfall (mm)", value=5.0, min_value=0.0, max_value=100.0)
+            expected_rainfall = st.number_input(
+                "Expected Rainfall (mm)", value=5.0, min_value=0.0, key="phase3_expected_rainfall"
+            )
+            available_water = st.number_input(
+                "Irrigation Supply Available (mm)",
+                value=100.0,
+                min_value=0.0,
+                key="phase3_available_water",
+            )
         with col3:
-            available_water = st.number_input("Available Water (mm)", value=100.0, min_value=0.0, max_value=500.0)
+            field_area_m2 = st.number_input(
+                "Irrigated Field Area (m²)",
+                value=0.0,
+                min_value=0.0,
+                key="phase3_field_area",
+                help="Enter the irrigated area to calculate application duration.",
+            )
+            flow_rate = st.number_input(
+                "Irrigation Flow Rate (L/s)",
+                value=2.5,
+                min_value=0.01,
+                key="phase3_flow_rate",
+            )
 
         if st.button("Generate Irrigation Schedule"):
-            crop_water_demand = ag_demand * 1000  # Convert BCM to mm for field scale
-
-            climate_forecast = {'rainfall_expected': expected_rainfall}
-
             schedule = scheduler.calculate_irrigation_schedule(
-                crop_water_demand=crop_water_demand,
+                soil_water_capacity=soil_water_capacity,
                 soil_moisture=soil_moisture,
-                climate_forecast=climate_forecast,
-                water_availability=available_water
+                rainfall_expected=expected_rainfall,
+                water_availability=available_water,
+                field_area_m2=field_area_m2,
+                flow_rate_lps=flow_rate,
             )
 
             st.session_state.current_schedule = schedule
@@ -1075,6 +1123,9 @@ with phase3:
                 st.session_state.current_schedule.get('soil_moisture_current') != soil_moisture
                 or st.session_state.current_schedule.get('rainfall_expected_mm') != expected_rainfall
                 or st.session_state.current_schedule.get('water_availability_mm') != available_water
+                or st.session_state.current_schedule.get('soil_water_capacity_mm') != soil_water_capacity
+                or st.session_state.current_schedule.get('field_area_m2') != field_area_m2
+                or st.session_state.current_schedule.get('flow_rate') != flow_rate
             )
         )
         if schedule_inputs_changed:
@@ -1088,25 +1139,37 @@ with phase3:
             s1, s2, s3, s4 = st.columns(4)
             s1.metric("Irrigation Amount", f"{schedule['net_irrigation_mm']:.1f} mm")
             s2.metric("Timing", schedule['timing'])
-            s3.metric("Duration", f"{schedule['duration_minutes']:.1f} min")
+            duration = schedule['duration_minutes']
+            s3.metric(
+                "Duration",
+                f"{duration:.1f} min" if duration is not None else "Enter field area",
+            )
             s4.metric("Flow Rate", f"{schedule['flow_rate']:.1f} L/s")
 
-            st.metric("Crop Stress Level", f"{schedule['stress_level']:.2f}",
-                     delta=f"Current soil moisture: {schedule['soil_moisture_current']:.1f} mm")
+            st.metric(
+                "Soil-Water Deficit Proxy",
+                f"{schedule['stress_level']:.2f}",
+                delta=f"Current soil moisture: {schedule['soil_moisture_current']:.1f} mm",
+                help="Estimated root-zone deficit fraction; this is not a crop-model stress output.",
+            )
 
             # Visualization
+            st.caption("Water-balance estimate; crop-specific stress is not modeled here.")
             stress_data = {
-                'Stress Level': schedule['stress_level'],
-                'Soil Moisture': schedule['soil_moisture_current'] / 100,
-                'Water Demand': schedule['crop_water_demand'] / 1000
+                'Target Soil Water (mm)': schedule['soil_water_capacity_mm'],
+                'Current Soil Moisture (mm)': schedule['soil_moisture_current'],
+                'Expected Rainfall (mm)': schedule['rainfall_expected_mm'],
+                'Recommended Irrigation (mm)': schedule['net_irrigation_mm'],
+                'Irrigation Supply (mm)': schedule['water_availability_mm'],
             }
 
             fig_stress = px.bar(
                 x=list(stress_data.keys()),
                 y=list(stress_data.values()),
-                title="Irrigation Decision Factors",
+                title="Root-Zone Water Balance",
                 color=list(stress_data.values()),
-                color_continuous_scale='RdYlGn_r'
+                color_continuous_scale='Blues',
+                labels={"x": "Water-balance input", "y": "Water depth (mm)", "color": "Water depth (mm)"},
             )
             st.plotly_chart(fig_stress, use_container_width=True)
     else:
@@ -1114,19 +1177,38 @@ with phase3:
             st.info("Enter field measurements to generate a local irrigation schedule. Research simulations and optimization remain restricted to Admin/Researcher accounts.")
             if "irrigation_scheduler" not in st.session_state:
                 st.session_state.irrigation_scheduler = IrrigationScheduler()
-            field_col1, field_col2 = st.columns(2)
+            field_col1, field_col2, field_col3 = st.columns(3)
             with field_col1:
-                field_demand = st.number_input("Estimated Crop Water Demand (mm)", min_value=0.0, value=45.0, key="field_crop_demand")
+                field_capacity = st.number_input(
+                    "Target Soil Water Capacity (mm)",
+                    min_value=0.0,
+                    value=100.0,
+                    key="field_soil_water_capacity",
+                    help="Target root-zone water level, such as field capacity.",
+                )
                 field_moisture = st.number_input("Current Soil Moisture (mm)", min_value=0.0, value=25.0, key="field_soil_moisture")
             with field_col2:
                 field_rain = st.number_input("Expected Rainfall (mm)", min_value=0.0, value=0.0, key="field_expected_rain")
-                field_water = st.number_input("Available Irrigation Water (mm)", min_value=0.0, value=100.0, key="field_available_water")
+                field_water = st.number_input("Irrigation Supply Available (mm)", min_value=0.0, value=100.0, key="field_available_water")
+            with field_col3:
+                field_area = st.number_input(
+                    "Irrigated Field Area (m²)",
+                    min_value=0.0,
+                    value=0.0,
+                    key="field_area_m2",
+                    help="Enter the irrigated area to calculate application duration.",
+                )
+                field_flow_rate = st.number_input(
+                    "Irrigation Flow Rate (L/s)", min_value=0.01, value=2.5, key="field_flow_rate"
+                )
             if st.button("Generate Field Irrigation Schedule", key="field_generate_schedule"):
                 field_schedule = st.session_state.irrigation_scheduler.calculate_irrigation_schedule(
-                    crop_water_demand=field_demand,
+                    soil_water_capacity=field_capacity,
                     soil_moisture=field_moisture,
-                    climate_forecast={"rainfall_expected": field_rain},
+                    rainfall_expected=field_rain,
                     water_availability=field_water,
+                    field_area_m2=field_area,
+                    flow_rate_lps=field_flow_rate,
                 )
                 st.session_state.current_schedule = field_schedule
                 _execute_db(
@@ -1145,9 +1227,13 @@ with phase3:
             if "current_schedule" in st.session_state:
                 current_field_schedule = st.session_state.current_schedule
                 st.metric("Recommended Irrigation", f"{current_field_schedule['net_irrigation_mm']:.1f} mm")
+                duration = current_field_schedule["duration_minutes"]
+                duration_text = (
+                    f"{duration:.1f} min" if duration is not None else "Enter field area to calculate"
+                )
                 st.write(
                     f"Timing: **{current_field_schedule['timing']}** · "
-                    f"Duration: **{current_field_schedule['duration_minutes']:.1f} min** · "
+                    f"Duration: **{duration_text}** · "
                     f"Flow: **{current_field_schedule['flow_rate']:.1f} L/s**"
                 )
             saved_schedules = _read_db_query("SELECT * FROM irrigation_schedules ORDER BY timestamp DESC")
@@ -1346,7 +1432,12 @@ with phase4:
             st.write("**Automated Irrigation**")
             if 'current_schedule' in st.session_state:
                 schedule = st.session_state.current_schedule
-                if st.button("Execute Automated Irrigation"):
+                if schedule['duration_minutes'] is None:
+                    st.warning("Enter the irrigated field area in Phase 3 before executing timed irrigation.")
+                if st.button(
+                    "Execute Automated Irrigation",
+                    disabled=schedule['duration_minutes'] is None,
+                ):
                     hw_interface.automate_irrigation(
                         schedule['net_irrigation_mm'],
                         schedule['duration_minutes'],
@@ -1417,7 +1508,11 @@ with phase4:
                     "endpoint": "POST /api/v1/field/sync",
                     "irrigation_amount_mm": round(schedule['net_irrigation_mm'], 1),
                     "timing": schedule['timing'],
-                    "duration_minutes": round(schedule['duration_minutes'], 1),
+                    "duration_minutes": (
+                        round(schedule['duration_minutes'], 1)
+                        if schedule['duration_minutes'] is not None
+                        else None
+                    ),
                     "flow_rate_lps": schedule['flow_rate'],
                     "drivers": {
                         "country": country,
@@ -1426,7 +1521,12 @@ with phase4:
                     },
                 }
                 st.json(payload)
-                if st.button("Push Instruction to Mobile + SMS"):
+                if schedule['duration_minutes'] is None:
+                    st.warning("Enter the irrigated field area in Phase 3 before sending a timed instruction.")
+                if st.button(
+                    "Push Instruction to Mobile + SMS",
+                    disabled=schedule['duration_minutes'] is None,
+                ):
                     if 'sms_module' not in st.session_state:
                         st.session_state.sms_module = SMSCommunicationModule()
                     phone = st.session_state.get('last_mobile_phone', '+251955006516')
@@ -1496,11 +1596,15 @@ if is_admin:
 
                 if 'current_schedule' in st.session_state:
                     schedule = st.session_state.current_schedule
+                    duration = schedule['duration_minutes']
+                    duration_text = (
+                        f"{duration:.1f} min" if duration is not None else "Not calculated (field area required)"
+                    )
                     report_content += f"""
                 - Irrigation Amount: {schedule['net_irrigation_mm']:.1f} mm
                 - Timing: {schedule['timing']}
-                - Duration: {schedule['duration_minutes']:.1f} min
-                - Stress Level: {schedule['stress_level']:.2f}
+                - Duration: {duration_text}
+                - Soil-Water Deficit Proxy: {schedule['stress_level']:.2f}
                     """
 
                 st.download_button(
