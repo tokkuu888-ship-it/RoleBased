@@ -487,12 +487,11 @@ with st.sidebar:
             del st.session_state[key]
         st.rerun()
     st.divider()
+    st.header("🌿 TOKUMA Control Panel")
     if is_admin:
-        st.markdown("### 🛠️ Admin Navigation")
-        st.caption("Authorized phases: 1, 2, 3, 4, and 5. Select a phase tab in the main panel.")
+        st.caption("Configure the nexus study, then run the integrated analysis.")
     else:
-        st.markdown("### 🚜 Field Navigation")
-        st.caption("Authorized phases: 3 and 4. Select a phase tab in the main panel.")
+        st.caption("Field tools are available in the workspace tabs.")
 
 # Main application banner
 if is_admin:
@@ -533,37 +532,44 @@ run_morris_ui = False
 
 if is_admin:
     with st.sidebar:
-        st.header("👤 Research Profile")
-        username = st.text_input("Name", value=st.session_state.user)
-        country = st.selectbox("Select Country", ["Ethiopia", "Kenya", "Sudan", "Egypt"], key="country")
-        target_year = st.slider("Target Year", 2024, 2100, 2050, key="target_year")
-        crop_type = st.selectbox("Crop Type", ["Wheat", "Maize", "Teff"], key="crop_type")
+        with st.expander("👤 Research Profile", expanded=False):
+            username = st.text_input("Name", value=st.session_state.user)
 
-        with st.expander("🛠️ Model & Optimization", expanded=True):
+        with st.expander("🌍 Environment & Crop", expanded=True):
+            country = st.selectbox("Select Country", ["Ethiopia", "Kenya", "Sudan", "Egypt"], key="country")
+            target_year = st.slider("Target Year", 2024, 2100, 2050, key="target_year")
+            crop_type = st.selectbox("Crop Type", ["Wheat", "Maize", "Teff"], key="crop_type")
+            climate_scenario = st.select_slider(
+                "Emission Scenario (SSP)",
+                options=["SSP1-2.6", "SSP2-4.5", "SSP5-8.5"],
+                key="climate_scenario",
+            )
+            climate_sensitivity = st.slider(
+                "Regional Sensitivity Index", 0.5, 3.0, 1.0, key="climate_sensitivity"
+            )
+
+        with st.expander("🚜 Management & Nexus Models", expanded=False):
             s_mod = st.selectbox("Supply Model", ["SWAT", "MODFLOW", "SWAT + MODFLOW"])
-            use_ml_surrogate = st.checkbox("Enable PINNs/GNNs Surrogate")
             p_mod = st.selectbox("Population Model", ["Cohort-Component", "Bayesian"])
             d_meth = st.selectbox("Demand Projection Method", ["System Dynamics-WEAP", "Agent-Based"])
-            use_lstm = st.checkbox("Enable LSTM Surrogate")
-            st.write("**Simulation Settings**")
-            sim_eng = st.selectbox("Simulation Engine", ["AquaCrop", "EPIC", "WaPOR"])
-            use_breeding = st.checkbox("Enable In-Silico Breeding Gain")
             f_len = st.number_input("Furrow Length (m)", value=150.0, key="f_len")
             f_slp = st.number_input("Furrow Slope (%)", value=0.1, key="f_slp")
-            schedule = st.selectbox("Scheduling", ["Traditional", "ET-based", "Soil moisture based"], key="schedule_method")
+            schedule = st.selectbox(
+                "Scheduling", ["Traditional", "ET-based", "Soil moisture based"], key="schedule_method"
+            )
+
+        with st.expander("🔬 Simulation & Analysis", expanded=False):
+            sim_eng = st.selectbox("Simulation Engine", ["AquaCrop", "EPIC", "WaPOR"])
             opt_eng = st.selectbox("Optimization Engine", ["Genetic Algorithm (GA)", "NSGA-II"])
+            use_ml_surrogate = st.checkbox("Enable PINNs/GNNs Surrogate")
+            use_lstm = st.checkbox("Enable LSTM Surrogate")
+            use_breeding = st.checkbox("Enable In-Silico Breeding Gain")
             st.caption("Integrated proxy vs file-coupled subprocess (template → runner → CSV).")
             use_file_coupling = st.checkbox(
                 "File-coupled simulation (subprocess pipeline)",
                 value=False,
                 help="Writes model_templates inputs, runs coupled_runner.py, reads sim_output.csv — same core, closed loop.",
             )
-
-        with st.expander("☁️ Climate Modules"):
-            climate_scenario = st.select_slider("Emission Scenario (SSP)", options=["SSP1-2.6", "SSP2-4.5", "SSP5-8.5"], key="climate_scenario")
-            climate_sensitivity = st.slider("Regional Sensitivity Index", 0.5, 3.0, 1.0, key="climate_sensitivity")
-
-        with st.expander("📐 Rigor (SALib / MC)", expanded=False):
             sobol_n = st.slider("Sobol base sample size (N)", 64, 384, 128, 32)
             mc_n = st.slider("Monte Carlo draws", 500, 5000, 1500, 100)
             run_morris_ui = st.checkbox("Compute Morris screening (μ*, σ)", value=False)
@@ -578,6 +584,10 @@ if is_admin:
             st.write("**Irrigation Scheduling**")
             auto_schedule = st.checkbox("Auto-generate Schedules", value=True)
             schedule_frequency = st.selectbox("Schedule Frequency", ["Daily", "Weekly", "Bi-weekly"])
+        st.divider()
+        run_trigger = st.button(
+            "🚀 Run Simulation-Optimization", type="primary", use_container_width=True
+        )
 else:
     # Field profile: local operational context only; research/model controls remain hidden.
     with st.sidebar:
@@ -595,7 +605,6 @@ else:
 # Research simulation and optimization are restricted to Admin/Researcher.
 if is_admin:
     update_reactive_parameters()
-    run_trigger = st.button("🚀 Run Simulation-Optimization", type="primary", use_container_width=True)
 else:
     run_trigger = False
 
@@ -603,11 +612,11 @@ else:
 phase1 = phase2 = phase5 = None
 if is_admin:
     phase_labels = [
-        "🌍 Phase 1: Drivers & Projections",
-        "🔬 Phase 2: Simulation & Analysis",
-        "💧 Phase 3: Irrigation Scheduling",
-        "🚜 Phase 4: Field Operations",
-        "📊 Phase 5: Reporting & Export",
+        "🌍 Drivers",
+        "🔬 Simulation",
+        "💧 Irrigation",
+        "🚜 Field Operations",
+        "📊 Reports",
     ]
     phase_handles = st.tabs(phase_labels)
     phase1, phase2, phase3, phase4, phase5 = phase_handles
