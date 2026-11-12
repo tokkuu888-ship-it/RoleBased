@@ -1245,7 +1245,7 @@ with phase4:
         st.write("**SMS Communication**")
         if comm_manager.irrigation_instructions:
             with st.form("send_sms"):
-                phone_number = st.text_input("Phone Number", value="+251911234567")
+                phone_number = st.text_input("Phone Number", value="+251955006516")
                 if st.form_submit_button("Send SMS Instruction"):
                     for instruction in comm_manager.irrigation_instructions[-1:]:  # Send latest
                         message = sms_module.format_irrigation_instruction_sms(instruction)
@@ -1375,7 +1375,7 @@ with phase4:
                 mobile_farmer_id = st.text_input("Farmer ID (mobile)", value="MOB001")
                 mobile_location = st.text_input("GPS / Field Location", value="Wonji")
                 mobile_soil = st.number_input("Soil Moisture from App (mm)", value=28.0)
-                mobile_phone = st.text_input("Phone for SMS fallback", value="+251911234567")
+                mobile_phone = st.text_input("Phone for SMS fallback", value="+251955006516")
                 if st.form_submit_button("Queue Mobile Sync Request"):
                     if 'field_comm_manager' not in st.session_state:
                         st.session_state.field_comm_manager = FieldCommunicationManager()
@@ -1412,7 +1412,7 @@ with phase4:
                 if st.button("Push Instruction to Mobile + SMS"):
                     if 'sms_module' not in st.session_state:
                         st.session_state.sms_module = SMSCommunicationModule()
-                    phone = st.session_state.get('last_mobile_phone', '+251911234567')
+                    phone = st.session_state.get('last_mobile_phone', '+251955006516')
                     instruction = {
                         'irrigation_amount': schedule['net_irrigation_mm'],
                         'duration_minutes': schedule['duration_minutes'],
