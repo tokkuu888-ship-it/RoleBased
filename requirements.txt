@@ -22,3 +22,7 @@ pylatex>=1.4.0
 pyproj>=3.6.0
 netcdf4>=1.6.0
 xarray>=2023.8.0
+
+# Edge computing and agricultural sensor API
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0

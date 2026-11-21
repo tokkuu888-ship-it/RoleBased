@@ -2,3 +2,12 @@
 __pycache__/
 *.py[cod]
 tokuma_phd_research.db
+
+# Python virtual environment
+.venv/
+
+# Local sensor database
+tokuma_sensor_data.db
+
+# Environment variables
+.env
