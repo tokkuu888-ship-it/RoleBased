@@ -1249,8 +1249,14 @@ with phase4:
     st.subheader("🚜 Phase 4: Field Operations")
     st.markdown("NEW: Field communication, SMS messaging, and hardware control for irrigation automation")
 
-    p4_tab1, p4_tab2, p4_tab3, p4_tab4 = st.tabs(
-        ["📝 Field Entry", "📡 Communication", "⚙️ Hardware Control", "📱 Mobile App Sync"]
+    p4_tab1, p4_tab2, p4_tab3, p4_tab4, p4_tab5 = st.tabs(
+        [
+            "📝 Field Observation Entry",
+            "📡 Server-Field Communication",
+            "⚙️ Hardware Control",
+            "🌱 Agricultural Sensor Monitoring",
+            "📱 Mobile App Sync"
+        ]
     )
 
     with p4_tab1:
@@ -1465,7 +1471,275 @@ with phase4:
                 log_df = pd.DataFrame(hw_interface.control_log[-10:])
                 st.dataframe(log_df, use_container_width=True)
 
+    # ==========================================
+    # AGRICULTURAL SENSOR MONITORING
+    # Step 5.3.3 - Read-only SQLite Integration
+    # ==========================================
+    @st.fragment(run_every="15s")
+    def render_sensor_monitoring():
+        st.subheader("🌱 Agricultural Sensor Monitoring")
+        st.markdown(
+            "Monitor soil moisture and weather observations "
+            "collected from agricultural field sensors."
+        )
+
+        st.info(
+            "Data source: TOKUMA persistent SQLite sensor database. "
+            "Initial measurements are simulated test observations."
+        )
+
+        if st.button("🔄 Refresh Sensor Data", key="refresh_sensor_dashboard"):
+            st.rerun()
+
+        sensor_conn = None
+
+        try:
+            # Open the sensor database in read-only mode.
+            sensor_conn = sqlite3.connect(
+                "file:tokuma_sensor_data.db?mode=ro",
+                uri=True
+            )
+
+            # Retrieve available experimental fields.
+            fields_df = pd.read_sql_query(
+                """
+                SELECT DISTINCT field_id
+                FROM sensor_readings
+                ORDER BY field_id
+                """,
+                sensor_conn
+            )
+
+            if fields_df.empty:
+                st.warning("No sensor readings are available yet.")
+
+            else:
+                field_options = fields_df["field_id"].tolist()
+
+                selected_field = st.selectbox(
+                    "Select Experimental Field",
+                    field_options,
+                    key="sensor_monitoring_field"
+                )
+
+                # Retrieve historical readings for the selected field.
+                history_df = pd.read_sql_query(
+                    """
+                    SELECT *
+                    FROM sensor_readings
+                    WHERE field_id = ?
+                    ORDER BY timestamp ASC
+                    """,
+                    sensor_conn,
+                    params=(selected_field,)
+                )
+
+                if history_df.empty:
+                    st.warning(
+                        f"No sensor records found for {selected_field}."
+                    )
+
+                else:
+                    latest = history_df.iloc[-1]
+
+                    st.markdown("---")
+                    st.markdown(
+                        f"### 📡 Latest Sensor Readings: {selected_field}"
+                    )
+
+                    def sensor_display(value, unit):
+                        if pd.isna(value):
+                            return "—"
+                        return f"{float(value):.1f} {unit}"
+
+                    # Display the four sensor measurements.
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    col1.metric(
+                        "Soil Moisture",
+                        sensor_display(latest["soil_moisture"], "%")
+                    )
+
+                    col2.metric(
+                        "Air Temperature",
+                        sensor_display(latest["air_temperature"], "°C")
+                    )
+
+                    col3.metric(
+                        "Relative Humidity",
+                        sensor_display(latest["relative_humidity"], "%")
+                    )
+
+                    col4.metric(
+                        "Rainfall",
+                        sensor_display(latest["rainfall"], "mm")
+                    )
+
+                    st.caption(
+                        f"Latest observation timestamp: {latest['timestamp']}"
+                    )
+
+                    st.markdown("---")
+                    st.markdown("### 📈 Historical Sensor Trends")
+
+                    # Convert timestamps for chronological plotting.
+                    history_df["timestamp"] = pd.to_datetime(
+                        history_df["timestamp"],
+                        errors="coerce",
+                        utc=True
+                    )
+                    # Soil moisture trend - corrected visualization.
+                    soil_plot_df = history_df.copy()
+
+                    soil_plot_df["soil_moisture"] = pd.to_numeric(
+                        soil_plot_df["soil_moisture"],
+                        errors="coerce"
+                    )
+
+                    soil_plot_df = soil_plot_df.dropna(
+                        subset=["timestamp", "soil_moisture"]
+                    ).sort_values("timestamp")
+
+                    if not soil_plot_df.empty:
+                        soil_min = soil_plot_df["soil_moisture"].min()
+                        soil_max = soil_plot_df["soil_moisture"].max()
+
+                        # Provide a visible vertical range.
+                        padding = max((soil_max - soil_min) * 0.15, 1.0)
+
+                        soil_chart = px.line(
+                            soil_plot_df,
+                            x="timestamp",
+                            y="soil_moisture",
+                            markers=True,
+                            text="soil_moisture",
+                            title="Soil Moisture Trend",
+                            labels={
+                                "timestamp": "Observation Time (UTC)",
+                                "soil_moisture": "Soil Moisture (%)"
+                            }
+                        )
+
+                        soil_chart.update_traces(
+                            mode="lines+markers+text",
+                            texttemplate="%{text:.1f}%",
+                            textposition="top center",
+                            marker=dict(size=10)
+                        )
+
+                        soil_chart.update_yaxes(
+                            range=[
+                                max(0, soil_min - padding),
+                                soil_max + padding
+                            ],
+                            title="Soil Moisture (%)"
+                        )
+
+                        soil_chart.update_layout(
+                            hovermode="x unified"
+                        )
+
+                        st.plotly_chart(
+                            soil_chart,
+                            use_container_width=True
+                        )
+                    else:
+                        st.warning(
+                            "No valid soil moisture observations available."
+                        )
+
+
+                    # Air temperature trend.
+                    temperature_chart = px.line(
+                        history_df,
+                        x="timestamp",
+                        y="air_temperature",
+                        markers=True,
+                        title="Air Temperature Trend",
+                        labels={
+                            "timestamp": "Observation Time",
+                            "air_temperature": "Temperature (°C)"
+                        }
+                    )
+
+                    st.plotly_chart(
+                        temperature_chart,
+                        use_container_width=True
+                    )
+
+                    # Relative humidity trend.
+                    humidity_chart = px.line(
+                        history_df,
+                        x="timestamp",
+                        y="relative_humidity",
+                        markers=True,
+                        title="Relative Humidity Trend",
+                        labels={
+                            "timestamp": "Observation Time",
+                            "relative_humidity": "Relative Humidity (%)"
+                        }
+                    )
+
+                    st.plotly_chart(
+                        humidity_chart,
+                        use_container_width=True
+                    )
+
+                    # Rainfall trend.
+                    rainfall_chart = px.bar(
+                        history_df,
+                        x="timestamp",
+                        y="rainfall",
+                        title="Recorded Rainfall",
+                        labels={
+                            "timestamp": "Observation Time",
+                            "rainfall": "Rainfall (mm)"
+                        }
+                    )
+
+                    st.plotly_chart(
+                        rainfall_chart,
+                        use_container_width=True
+                    )
+
+                    st.markdown("---")
+                    st.markdown("### 📋 Sensor Reading History")
+
+                    display_df = history_df.sort_values(
+                        "timestamp",
+                        ascending=False
+                    )
+
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    st.success(
+                        f"Successfully retrieved {len(history_df)} "
+                        f"sensor reading(s) for {selected_field}."
+                    )
+
+        except (sqlite3.Error, pd.errors.DatabaseError) as error:
+            st.error(
+                f"Unable to read the sensor database: {error}"
+            )
+
+        except Exception as error:
+            st.error(
+                f"Sensor monitoring error: {error}"
+            )
+
+        finally:
+            if sensor_conn is not None:
+                sensor_conn.close()
+            # TAB 4: Agricultural Sensor Monitoring
     with p4_tab4:
+        render_sensor_monitoring()
+
+    # TAB 5: Offline Mobile App Sync
+    with p4_tab5:
         st.subheader("📱 Offline Mobile App Sync")
         st.markdown(
             "Field users in rural areas can sync irrigation requests and receive instructions "
