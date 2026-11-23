@@ -2,6 +2,7 @@ import sqlite3
 from datetime import datetime
 from importlib import import_module
 import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -1578,6 +1579,289 @@ with phase4:
                     st.caption(
                         f"Latest observation timestamp: {latest['timestamp']}"
                     )
+
+                    # ==========================================
+                    # STEP 5.3.8 - SENSOR QUALITY AND RELIABILITY
+                    # ==========================================
+
+                    st.markdown("---")
+                    st.markdown(
+                        "### 🛡️ Sensor Data Quality and Reliability"
+                    )
+
+                    quality_log_path = (
+                        Path(__file__).resolve().parent
+                        / "tokuma_sensor_quality_log.jsonl"
+                    )
+
+                    quality_records = []
+
+                    if quality_log_path.exists():
+
+                        try:
+                            with open(
+                                quality_log_path,
+                                "r",
+                                encoding="utf-8"
+                            ) as quality_file:
+
+                                for line_number, line in enumerate(
+                                    quality_file,
+                                    start=1
+                                ):
+                                    if not line.strip():
+                                        continue
+
+                                    try:
+                                        record = json.loads(line)
+
+                                        if (
+                                            record.get("field_id")
+                                            == selected_field
+                                        ):
+                                            quality_records.append(record)
+
+                                    except json.JSONDecodeError:
+                                        st.warning(
+                                            "A malformed quality-log entry "
+                                            f"was skipped (line {line_number})."
+                                        )
+
+                        except OSError as error:
+                            st.error(
+                                f"Unable to read sensor quality log: {error}"
+                            )
+
+                    else:
+                        st.info(
+                            "No sensor quality assessment log is available yet."
+                        )
+
+                    if quality_records:
+
+                        quality_df = pd.DataFrame(quality_records)
+
+                        # Normalize quality status values.
+                        quality_df["quality_status"] = (
+                            quality_df["quality_status"]
+                            .fillna("UNKNOWN")
+                            .astype(str)
+                            .str.upper()
+                        )
+
+                        acceptable_count = int(
+                            (quality_df["quality_status"] == "ACCEPTABLE").sum()
+                        )
+
+                        incomplete_count = int(
+                            (quality_df["quality_status"] == "INCOMPLETE").sum()
+                        )
+
+                        review_count = int(
+                            (quality_df["quality_status"] == "REVIEW").sum()
+                        )
+
+                        total_quality = len(quality_df)
+
+                        acceptance_rate = (
+                            acceptable_count / total_quality
+                        ) * 100
+
+                        # Quality assessment summary.
+                        st.markdown(
+                            f"**Quality assessment summary: {selected_field}**"
+                        )
+
+                        qcol1, qcol2, qcol3, qcol4 = st.columns(4)
+
+                        qcol1.metric(
+                            "Total Assessments",
+                            total_quality
+                        )
+
+                        qcol2.metric(
+                            "Acceptable",
+                            acceptable_count
+                        )
+
+                        qcol3.metric(
+                            "Incomplete",
+                            incomplete_count
+                        )
+
+                        qcol4.metric(
+                            "Review Required",
+                            review_count
+                        )
+
+                        st.metric(
+                            "Acceptable Assessment Rate",
+                            f"{acceptance_rate:.1f}%"
+                        )
+
+                        # Explain quality results.
+                        if review_count > 0:
+                            st.error(
+                                f"{review_count} assessment(s) require "
+                                "quality review."
+                            )
+
+                        if incomplete_count > 0:
+                            st.warning(
+                                f"{incomplete_count} assessment(s) contain "
+                                "incomplete optional sensor information."
+                            )
+
+                        if review_count == 0 and incomplete_count == 0:
+                            st.success(
+                                "All recorded assessments are acceptable."
+                            )
+
+                        # Display quality flags.
+                        st.markdown("#### Quality Flags and Warnings")
+
+                        flag_records = []
+
+                        for record in quality_records:
+
+                            flags = record.get("quality_flags", [])
+
+                            if not isinstance(flags, list):
+                                flags = []
+
+                            for flag in flags:
+                                flag_records.append({
+                                    "Sensor ID": record.get(
+                                        "sensor_id", "Unknown"
+                                    ),
+                                    "Quality Status": record.get(
+                                        "quality_status", "UNKNOWN"
+                                    ),
+                                    "Quality Flag": str(flag),
+                                    "Assessment Time": record.get(
+                                        "assessment_timestamp", "Unknown"
+                                    )
+                                })
+
+                        if flag_records:
+                            flags_df = pd.DataFrame(flag_records)
+
+                            st.dataframe(
+                                flags_df,
+                                use_container_width=True,
+                                hide_index=True
+                            )
+
+                        else:
+                            st.info(
+                                "No quality flags were recorded for this field."
+                            )
+                        # ==========================================
+                        # STEP 5.3.8.9 - INDIVIDUAL QUALITY TREND
+                        # ==========================================
+
+                        quality_df["assessment_timestamp"] = pd.to_datetime(
+                            quality_df["assessment_timestamp"],
+                            errors="coerce",
+                            utc=True
+                        )
+
+                        trend_df = (
+                            quality_df
+                            .dropna(subset=["assessment_timestamp"])
+                            .sort_values("assessment_timestamp")
+                            .copy()
+                        )
+
+                        if not trend_df.empty:
+
+                            # Convert quality flags into readable text.
+                            trend_df["quality_flags_display"] = [
+                                ", ".join(flags)
+                                if isinstance(flags, list) and flags
+                                else "No quality flags"
+                                for flags in trend_df["quality_flags"]
+                            ]
+
+                            # Display each assessment individually.
+                            quality_chart = px.scatter(
+                                trend_df,
+                                x="assessment_timestamp",
+                                y="quality_status",
+                                color="quality_status",
+                                category_orders={
+                                    "quality_status": [
+                                        "ACCEPTABLE",
+                                        "INCOMPLETE",
+                                        "REVIEW"
+                                    ]
+                                },
+                                color_discrete_map={
+                                    "ACCEPTABLE": "#16A34A",
+                                    "INCOMPLETE": "#E5A000",
+                                    "REVIEW": "#DC2626"
+                                },
+                                hover_data={
+                                    "sensor_id": True,
+                                    "quality_flags_display": True,
+                                    "flag_count": True,
+                                    "assessment_timestamp": False
+                                },
+                                title=(
+                                    "Individual Sensor Quality "
+                                    "Assessments Over Time"
+                                ),
+                                labels={
+                                    "assessment_timestamp": (
+                                        "Assessment Time (UTC)"
+                                    ),
+                                    "quality_status": "Quality Status",
+                                    "sensor_id": "Sensor ID",
+                                    "quality_flags_display": "Quality Flags",
+                                    "flag_count": "Number of Flags"
+                                }
+                            )
+
+                            quality_chart.update_traces(
+                                marker=dict(size=13),
+                                selector=dict(mode="markers")
+                            )
+
+                            quality_chart.update_yaxes(
+                                categoryorder="array",
+                                categoryarray=[
+                                    "ACCEPTABLE",
+                                    "INCOMPLETE",
+                                    "REVIEW"
+                                ],
+                                title="Quality Classification"
+                            )
+
+                            quality_chart.update_xaxes(
+                                title="Assessment Time (UTC)"
+                            )
+
+                            quality_chart.update_layout(
+                                hovermode="closest"
+                            )
+
+                            st.plotly_chart(
+                                quality_chart,
+                                use_container_width=True
+                            )
+
+                        else:
+                            st.info(
+                                "No valid assessment timestamps are "
+                                "available for historical plotting."
+                            )
+
+
+                    else:
+                        st.info(
+                            f"No quality assessments are currently "
+                            f"available for {selected_field}."
+                        )
 
                     st.markdown("---")
                     st.markdown("### 📈 Historical Sensor Trends")
