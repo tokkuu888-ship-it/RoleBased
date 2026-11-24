@@ -1,0 +1,126 @@
+﻿TOKUMA 3-in-1 Integrated Model
+STEP 5.3.11.2
+SENSOR-BASED IRRIGATION DECISION RULES
+
+1. PURPOSE
+
+Develop a sensor-based irrigation decision-support engine
+that integrates current sensor observations, technical quality
+assessment, anomaly detection, and agronomic information.
+
+The engine must not automatically operate irrigation equipment.
+
+2. SENSOR DATA VALIDATION
+
+The latest observation must contain:
+- field_id
+- sensor_id
+- soil_moisture
+- timestamp
+
+Use the existing evaluate_sensor_reading() function.
+
+REJECT an observation when:
+- Required information is missing.
+- Soil moisture is invalid or outside its technical range.
+- Timestamp is invalid or timezone-naive.
+- Timestamp is in the future.
+
+3. OBSERVATION FRESHNESS
+
+Reuse:
+EXPECTED_INTERVAL_SECONDS = 15
+STALE_READING_MULTIPLIER = 3
+STALE_READING_SECONDS = 45
+
+These are provisional software-testing settings.
+
+An observation older than the configured stale threshold
+must not support irrigation assessment.
+
+4. ANOMALY SAFEGUARDS
+
+Use existing anomaly detection results.
+
+Relevant WARNING or CRITICAL records associated with the
+latest observation must trigger SENSOR_REVIEW_REQUIRED.
+
+Historical INFO statistical observations alone must not
+automatically block the decision.
+
+5. SOIL MOISTURE INTERPRETATION
+
+Current sensor soil_moisture is stored as a percentage.
+
+It must be treated as an uncalibrated sensor percentage
+unless calibration metadata establishes otherwise.
+
+Never treat an uncalibrated percentage as:
+- Volumetric water content (m3/m3).
+- Soil-water depth (mm).
+- Root-zone water deficit (mm).
+
+6. AGRONOMIC REQUIREMENTS
+
+A quantitative irrigation assessment requires appropriate,
+validated information including:
+- Crop and growth stage.
+- Soil hydraulic and water-retention characteristics.
+- Calibrated volumetric soil moisture.
+- Root-zone depth.
+- Field capacity.
+- Permanent wilting point.
+- Allowable soil-water depletion.
+- Effective rainfall.
+- Available irrigation water.
+- Field area and irrigation flow information when calculating
+  application duration.
+
+Do not substitute infiltration parameters for soil-water
+retention parameters.
+
+7. DECISION CATEGORIES
+
+INSUFFICIENT_DATA:
+Required observation information is missing or invalid,
+or the observation is stale or future-dated.
+
+SENSOR_REVIEW_REQUIRED:
+The latest observation fails technical quality checks or
+relevant anomaly warnings require investigation.
+
+SENSOR_DATA_ACCEPTABLE:
+The current observation passes technical checks, but
+agronomic calibration or parameters are insufficient.
+
+IRRIGATION_ASSESSMENT_READY:
+Sensor calibration and all required agronomic parameters
+have been supplied and validated.
+
+8. OUTPUT REQUIREMENTS
+
+Return:
+- field_id
+- sensor_id
+- observation_timestamp
+- observation_age_seconds
+- quality_status
+- anomaly_status
+- decision_status
+- decision_reasons
+- irrigation_amount_mm
+- irrigation_duration_minutes
+- automatic_irrigation_enabled
+
+Until a validated agronomic calculation is implemented:
+irrigation_amount_mm = None
+irrigation_duration_minutes = None
+automatic_irrigation_enabled = False
+
+9. SCIENTIFIC AND OPERATIONAL LIMITATIONS
+
+Sensor quality acceptance does not establish calibration.
+Anomaly detection does not establish sensor accuracy.
+Simulated readings must always be identified as simulated.
+Provisional software thresholds must not be represented as
+experimentally calibrated agronomic thresholds.

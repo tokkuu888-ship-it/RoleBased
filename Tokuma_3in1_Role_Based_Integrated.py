@@ -18,6 +18,11 @@ import streamlit as st
 from sensor_anomaly_detection import (
     run_sensor_anomaly_detection
 )
+
+# STEP 5.3.11 - SENSOR-BASED IRRIGATION DECISION SUPPORT
+from sensor_irrigation_decision import (
+    evaluate_sensor_irrigation_decision
+)
 def _load_optional_import(module_name, symbol_name=None, feature_name=None) -> Any | None:
     try:
         module = import_module(module_name)
@@ -1549,6 +1554,12 @@ with phase4:
                 else:
                     latest = history_df.iloc[-1]
 
+                    # STEP 5.3.11 - Prepare shared sensor history
+                    # for anomaly detection and irrigation decisions.
+                    sensor_readings = history_df.to_dict(
+                        orient="records"
+                    )
+
                     st.markdown("---")
                     st.markdown(
                         f"### 📡 Latest Sensor Readings: {selected_field}"
@@ -1603,11 +1614,6 @@ with phase4:
                     )
 
                     try:
-                        # Convert selected-field history into records.
-                        sensor_readings = history_df.to_dict(
-                            orient="records"
-                        )
-
                         # Run all four anomaly detection methods.
                         anomaly_results = run_sensor_anomaly_detection(
                             sensor_readings
@@ -1761,6 +1767,162 @@ with phase4:
                     # ==========================================
                     # END STEP 5.3.10 ANOMALY DASHBOARD
                     # ==========================================
+                    # ==========================================
+                    # STEP 5.3.11 - SENSOR-BASED IRRIGATION
+                    # DECISION SUPPORT
+                    # ==========================================
+
+                    st.markdown("---")
+                    st.markdown(
+                        "### Sensor-Based Irrigation Decision Support"
+                    )
+
+                    try:
+                        latest_reading = latest.to_dict()
+
+                        decision_result = (
+                            evaluate_sensor_irrigation_decision(
+                                latest_reading,
+                                sensor_readings
+                            )
+                        )
+
+                        decision_status = decision_result.get(
+                            "decision_status",
+                            "INSUFFICIENT_DATA"
+                        )
+
+                        if decision_status == "SENSOR_DATA_ACCEPTABLE":
+                            st.success(
+                                "Sensor observation passed the current "
+                                "decision-engine checks."
+                            )
+
+                        elif decision_status == "SENSOR_REVIEW_REQUIRED":
+                            st.warning(
+                                "Sensor observation requires review "
+                                "before irrigation assessment."
+                            )
+
+                        else:
+                            st.error(
+                                "Insufficient data for a reliable "
+                                "sensor-based decision."
+                            )
+
+                        # Display decision and observation information.
+                        dcol1, dcol2, dcol3, dcol4 = st.columns(4)
+
+                        dcol1.metric(
+                            "Decision Status",
+                            decision_status
+                        )
+
+                        dcol2.metric(
+                            "Quality Status",
+                            decision_result.get(
+                                "quality_status",
+                                "NOT ASSESSED"
+                            )
+                        )
+
+                        dcol3.metric(
+                            "Anomaly Status",
+                            decision_result.get(
+                                "anomaly_status",
+                                "NOT ASSESSED"
+                            )
+                        )
+
+                        observation_age = decision_result.get(
+                            "observation_age_seconds"
+                        )
+
+                        age_display = (
+                            f"{observation_age:.1f} s"
+                            if observation_age is not None
+                            else "Not available"
+                        )
+
+                        dcol4.metric(
+                            "Observation Age",
+                            age_display
+                        )
+
+                        # Display irrigation outputs only when available.
+                        irrigation_amount = decision_result.get(
+                            "irrigation_amount_mm"
+                        )
+
+                        irrigation_duration = decision_result.get(
+                            "irrigation_duration_minutes"
+                        )
+
+                        st.markdown("**Irrigation Assessment**")
+
+                        icol1, icol2 = st.columns(2)
+
+                        icol1.metric(
+                            "Estimated Irrigation Amount",
+                            (
+                                f"{irrigation_amount:.2f} mm"
+                                if irrigation_amount is not None
+                                else "Not available"
+                            )
+                        )
+
+                        icol2.metric(
+                            "Estimated Irrigation Duration",
+                            (
+                                f"{irrigation_duration:.1f} minutes"
+                                if irrigation_duration is not None
+                                else "Not available"
+                            )
+                        )
+
+                        # Explain the decision.
+                        decision_reasons = decision_result.get(
+                            "decision_reasons",
+                            []
+                        )
+
+                        st.markdown("**Decision Explanation**")
+
+                        if decision_reasons:
+                            for reason in decision_reasons:
+                                st.write(f"- {reason}")
+                        else:
+                            st.write(
+                                "No additional decision explanation "
+                                "was returned."
+                            )
+
+                        st.info(
+                            "Scientific limitation: current soil-moisture "
+                            "readings are treated as uncalibrated percentages. "
+                            "They are not converted into volumetric water "
+                            "content or soil-water depth. Calibrated soil "
+                            "water-retention parameters and crop-specific "
+                            "information are required before calculating "
+                            "irrigation depth or duration."
+                        )
+
+                        st.caption(
+                            "Decision support only. Automatic irrigation "
+                            "is disabled; no valve or pump is operated."
+                        )
+
+                    except Exception as error:
+                        st.error(
+                            "Unable to complete sensor-based irrigation "
+                            "decision support: "
+                            f"{error}"
+                        )
+
+                    # ==========================================
+                    # END STEP 5.3.11 IRRIGATION DECISION SUPPORT
+                    # ==========================================
+
                     # ==========================================
                     # STEP 5.3.8 - SENSOR QUALITY AND RELIABILITY
                     # ==========================================
