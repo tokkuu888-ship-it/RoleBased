@@ -1757,6 +1757,167 @@ with phase4:
                                 "No quality flags were recorded for this field."
                             )
                         # ==========================================
+                        # STEP 5.3.9.2 - SENSOR-LEVEL RELIABILITY
+                        # ==========================================
+
+                        st.markdown("---")
+                        st.markdown(
+                            "### Individual Sensor Reliability Analysis"
+                        )
+
+                        # Prepare sensor identification.
+                        reliability_df = quality_df.copy()
+
+                        reliability_df["sensor_id"] = (
+                            reliability_df["sensor_id"]
+                            .fillna("Unknown")
+                            .astype(str)
+                            .replace("", "Unknown")
+                        )
+
+                        # Calculate quality indicators per sensor.
+                        reliability_records = []
+
+                        for sensor_id, sensor_group in (
+                            reliability_df.groupby("sensor_id")
+                        ):
+
+                            sensor_total = len(sensor_group)
+
+                            sensor_acceptable = int(
+                                (
+                                    sensor_group["quality_status"]
+                                    == "ACCEPTABLE"
+                                ).sum()
+                            )
+
+                            sensor_incomplete = int(
+                                (
+                                    sensor_group["quality_status"]
+                                    == "INCOMPLETE"
+                                ).sum()
+                            )
+
+                            sensor_review = int(
+                                (
+                                    sensor_group["quality_status"]
+                                    == "REVIEW"
+                                ).sum()
+                            )
+
+                            sensor_acceptance_rate = (
+                                sensor_acceptable / sensor_total
+                            ) * 100 if sensor_total > 0 else 0
+
+                            # Generate a descriptive monitoring note.
+                            if sensor_review > 0:
+                                monitoring_note = (
+                                    "Review flags recorded"
+                                )
+
+                            elif sensor_incomplete > 0:
+                                monitoring_note = (
+                                    "Incomplete optional data recorded"
+                                )
+
+                            else:
+                                monitoring_note = (
+                                    "No review or incomplete flags recorded"
+                                )
+
+                            reliability_records.append({
+
+                                "Sensor ID": sensor_id,
+
+                                "Total Assessments": sensor_total,
+
+                                "Acceptable": sensor_acceptable,
+
+                                "Incomplete": sensor_incomplete,
+
+                                "Review Required": sensor_review,
+
+                                "Acceptance Rate (%)": round(
+                                    sensor_acceptance_rate, 1
+                                ),
+
+                                "Monitoring Note": monitoring_note
+
+                            })
+
+                        # Display sensor-level reliability table.
+                        if reliability_records:
+
+                            sensor_reliability_df = pd.DataFrame(
+                                reliability_records
+                            )
+
+                            st.markdown(
+                                "#### Sensor-Level Quality Performance"
+                            )
+
+                            st.dataframe(
+                                sensor_reliability_df,
+                                use_container_width=True,
+                                hide_index=True
+                            )
+
+                            # Compare acceptance rates across sensors.
+                            st.markdown(
+                                "#### Sensor Acceptance Rate Comparison"
+                            )
+
+                            reliability_chart = px.bar(
+                                sensor_reliability_df,
+                                x="Sensor ID",
+                                y="Acceptance Rate (%)",
+                                color="Acceptance Rate (%)",
+                                hover_data=[
+                                    "Total Assessments",
+                                    "Acceptable",
+                                    "Incomplete",
+                                    "Review Required"
+                                ],
+                                title=(
+                                    "Acceptable Assessment Rate "
+                                    "by Sensor"
+                                ),
+                                text="Acceptance Rate (%)"
+                            )
+
+                            reliability_chart.update_layout(
+                                yaxis_title="Acceptable Assessments (%)",
+                                xaxis_title="Sensor Identification",
+                                yaxis_range=[0, 100]
+                            )
+
+                            reliability_chart.update_traces(
+                                texttemplate="%{text:.1f}%",
+                                textposition="outside"
+                            )
+
+                            st.plotly_chart(
+                                reliability_chart,
+                                use_container_width=True
+                            )
+
+                            st.caption(
+                                "Interpretation: Acceptance rate is the "
+                                "percentage of recorded assessments "
+                                "classified as ACCEPTABLE. It is a "
+                                "descriptive quality indicator, not a "
+                                "direct measurement of sensor accuracy. "
+                                "Interpret percentages alongside the "
+                                "number of assessments available."
+                            )
+
+                        else:
+
+                            st.info(
+                                "No sensor-level reliability records "
+                                "are available for this field."
+                            )
+                        # ==========================================
                         # STEP 5.3.8.9 - INDIVIDUAL QUALITY TREND
                         # ==========================================
 
