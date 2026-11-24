@@ -11,7 +11,13 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
+# ==================================================
+# STEP 5.3.10 - SENSOR ANOMALY DETECTION
+# ==================================================
 
+from sensor_anomaly_detection import (
+    run_sensor_anomaly_detection
+)
 def _load_optional_import(module_name, symbol_name=None, feature_name=None) -> Any | None:
     try:
         module = import_module(module_name)
@@ -1580,6 +1586,181 @@ with phase4:
                         f"Latest observation timestamp: {latest['timestamp']}"
                     )
 
+                    # ==========================================
+                    # STEP 5.3.10 - SENSOR ANOMALY DETECTION
+                    # ==========================================
+
+                    st.markdown("---")
+                    st.markdown(
+                        "### 🚨 Sensor Anomaly Detection and Early Warning"
+                    )
+
+                    st.caption(
+                        "Anomaly detection is performed using historical "
+                        "readings from the selected experimental field. "
+                        "Detection thresholds are provisional software "
+                        "testing parameters."
+                    )
+
+                    try:
+                        # Convert selected-field history into records.
+                        sensor_readings = history_df.to_dict(
+                            orient="records"
+                        )
+
+                        # Run all four anomaly detection methods.
+                        anomaly_results = run_sensor_anomaly_detection(
+                            sensor_readings
+                        )
+
+                        anomaly_summary = anomaly_results["summary"]
+
+                        severity_counts = (
+                            anomaly_summary["severity_counts"]
+                        )
+
+                        # Display anomaly summary.
+                        acol1, acol2, acol3, acol4 = st.columns(4)
+
+                        acol1.metric(
+                            "Total Anomalies",
+                            anomaly_summary["total_anomalies"]
+                        )
+
+                        acol2.metric(
+                            "Warnings",
+                            severity_counts["WARNING"]
+                        )
+
+                        acol3.metric(
+                            "Critical Alerts",
+                            severity_counts["CRITICAL"]
+                        )
+
+                        acol4.metric(
+                            "Affected Sensors",
+                            anomaly_summary["affected_sensor_count"]
+                        )
+
+                        # ==========================================
+                        # DISPLAY ANOMALIES BY SEVERITY
+                        # ==========================================
+
+                        anomaly_df = pd.DataFrame(
+                            anomaly_results["anomalies"]
+                        )
+
+                        if not anomaly_df.empty:
+
+                            info_df = anomaly_df[
+                                anomaly_df["severity"] == "INFO"
+                            ]
+
+                            warning_df = anomaly_df[
+                                anomaly_df["severity"] == "WARNING"
+                            ]
+
+                            critical_df = anomaly_df[
+                                anomaly_df["severity"] == "CRITICAL"
+                            ]
+
+                            display_columns = [
+                                "sensor_id",
+                                "parameter",
+                                "observed_value",
+                                "reference_value",
+                                "anomaly_type",
+                                "severity",
+                                "message",
+                                "recommendation"
+                            ]
+
+                            # Historical statistical information.
+                            if not info_df.empty:
+
+                                st.info(
+                                    f"{len(info_df)} historical "
+                                    "statistical deviation(s) detected. "
+                                    "These require interpretation and "
+                                    "do not independently confirm "
+                                    "sensor malfunction."
+                                )
+
+                                st.markdown(
+                                    "**Historical Statistical "
+                                    "Observations**"
+                                )
+
+                                st.dataframe(
+                                    info_df[display_columns],
+                                    use_container_width=True
+                                )
+
+                            # Operational warnings.
+                            if not warning_df.empty:
+
+                                st.warning(
+                                    f"{len(warning_df)} operational "
+                                    "warning(s) require investigation."
+                                )
+
+                                st.markdown(
+                                    "**Operational Warnings**"
+                                )
+
+                                st.dataframe(
+                                    warning_df[display_columns],
+                                    use_container_width=True
+                                )
+
+                            # Critical alerts.
+                            if not critical_df.empty:
+
+                                st.error(
+                                    f"{len(critical_df)} critical "
+                                    "alert(s) require immediate review."
+                                )
+
+                                st.markdown(
+                                    "**Critical Alerts**"
+                                )
+
+                                st.dataframe(
+                                    critical_df[display_columns],
+                                    use_container_width=True
+                                )
+
+                            affected_sensors = (
+                                anomaly_summary["affected_sensors"]
+                            )
+
+                            st.caption(
+                                "Sensors with historical or current "
+                                "detection records: "
+                                + ", ".join(affected_sensors)
+                            )
+
+                        else:
+
+                            st.success(
+                                "No anomalies detected in the "
+                                "available sensor history."
+                            )
+                        st.caption(
+                            "Detection methods: sudden change, statistical "
+                            "outlier, flatline, and delayed reading."
+                        )
+
+                    except Exception as error:
+
+                        st.error(
+                            "Unable to complete sensor anomaly detection: "
+                            f"{error}"
+                        )
+
+                    # ==========================================
+                    # END STEP 5.3.10 ANOMALY DASHBOARD
+                    # ==========================================
                     # ==========================================
                     # STEP 5.3.8 - SENSOR QUALITY AND RELIABILITY
                     # ==========================================
