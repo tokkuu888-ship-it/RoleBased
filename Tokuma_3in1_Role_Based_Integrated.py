@@ -23,6 +23,12 @@ from sensor_anomaly_detection import (
 from sensor_irrigation_decision import (
     evaluate_sensor_irrigation_decision
 )
+
+# STEP 5.3.12.1 - EXPERIMENTAL DESIGN DATABASE
+from experimental_design_database import (
+    initialize_experimental_design_schema,
+    get_experimental_design_inventory,
+)
 def _load_optional_import(module_name, symbol_name=None, feature_name=None) -> Any | None:
     try:
         module = import_module(module_name)
@@ -346,6 +352,16 @@ def init_db():
         c = conn.cursor()
         st.session_state.db_type = "sqlite"
     
+    # Enable referential integrity for local SQLite connections.
+    if st.session_state.db_type == "sqlite":
+        c.execute("PRAGMA foreign_keys = ON")
+        fk_result = c.execute("PRAGMA foreign_keys").fetchone()
+
+        if fk_result is None or fk_result[0] != 1:
+            raise RuntimeError(
+                "SQLite foreign-key enforcement could not be enabled."
+            )
+
     c.execute(
         """CREATE TABLE IF NOT EXISTS research_logs(
         timestamp TEXT, researcher TEXT, email TEXT, country TEXT,
@@ -376,6 +392,13 @@ def init_db():
         timestamp TEXT, device_id TEXT, action TEXT, 
         parameters TEXT, status TEXT)"""
     )
+    # STEP 5.3.12.1 - Initialize experimental-design schema.
+    # The caller (init_db) retains transaction ownership.
+    initialize_experimental_design_schema(
+        conn,
+        st.session_state.db_type
+    )
+
     conn.commit()
     return conn
 
@@ -2619,7 +2642,12 @@ if is_admin:
         st.subheader("📊 Phase 5: Reporting & Export")
         st.markdown("Generate reports, export data, and access API connectors")
 
-        p5_tab1, p5_tab2, p5_tab3 = st.tabs(["📄 Reports", "📡 API", "📂 Export"])
+        p5_tab1, p5_tab2, p5_tab3, p5_tab4 = st.tabs([
+            "Reports",
+            "API Connectors",
+            "Export",
+            "Experimental Design",
+        ])
 
         with p5_tab1:
             st.subheader("📄 Report Generation")
@@ -2773,3 +2801,200 @@ if is_admin:
                 )
             else:
                 st.info("Run simulation first to download Monte Carlo data")
+
+        # ==========================================================
+        # STEP 5.3.12.3.1 - EXPERIMENTAL DESIGN INSPECTION
+        # Read-only reporting: no registration or record modification.
+        # ==========================================================
+        with p5_tab4:
+            st.subheader("Registered Experimental Design")
+
+            st.caption(
+                "Read-only inspection of the registered HARC and MARC "
+                "experimental design. This interface does not register, "
+                "edit, or delete experimental records."
+            )
+
+            st.warning(
+                "Design records represent the proposed experimental "
+                "framework. They do not establish surveyed field boundaries, "
+                "physical plot randomization, or completed field operations."
+            )
+
+            try:
+                experimental_inventory = get_experimental_design_inventory(
+                    db_conn,
+                    st.session_state.get("db_type", "sqlite"),
+                )
+
+                inventory_counts = experimental_inventory["counts"]
+
+                # Key experimental design metrics.
+                metric_columns = st.columns(4)
+
+                metric_columns[0].metric(
+                    "Research Sites",
+                    inventory_counts["experimental_sites"],
+                )
+                metric_columns[1].metric(
+                    "Experimental Blocks",
+                    inventory_counts["experimental_blocks"],
+                )
+                metric_columns[2].metric(
+                    "Main Plots",
+                    inventory_counts["experimental_main_plots"],
+                )
+                metric_columns[3].metric(
+                    "Crop Subplots",
+                    inventory_counts["experimental_subplots"],
+                )
+
+                st.divider()
+
+                # Research site inventory.
+                st.markdown("#### 1. Research Sites")
+
+                sites_df = pd.DataFrame(
+                    experimental_inventory["sites"]
+                )
+
+                if not sites_df.empty:
+                    site_columns = [
+                        column for column in [
+                            "site_code",
+                            "site_name",
+                            "region",
+                            "latitude",
+                            "longitude",
+                            "altitude_m",
+                        ]
+                        if column in sites_df.columns
+                    ]
+
+                    st.dataframe(
+                        sites_df[site_columns],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                    st.caption(
+                        "Site coordinates are approximate proposal-based "
+                        "locations, not surveyed experimental plot coordinates."
+                    )
+                else:
+                    st.info("No research sites are registered.")
+
+                # Irrigation treatment distribution.
+                st.markdown("#### 2. Irrigation Treatment Distribution")
+
+                main_plots_df = pd.DataFrame(
+                    experimental_inventory["main_plots"]
+                )
+
+                if (
+                    not main_plots_df.empty
+                    and "irrigation_treatment" in main_plots_df.columns
+                ):
+                    treatment_summary = (
+                        main_plots_df["irrigation_treatment"]
+                        .value_counts()
+                        .rename_axis("Irrigation Treatment")
+                        .reset_index(name="Main Plot Count")
+                    )
+
+                    st.dataframe(
+                        treatment_summary,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("No irrigation main plots are registered.")
+
+                # Crop subplot distribution.
+                st.markdown("#### 3. Crop Subplot Distribution")
+
+                subplots_df = pd.DataFrame(
+                    experimental_inventory["subplots"]
+                )
+
+                if (
+                    not subplots_df.empty
+                    and "crop_code" in subplots_df.columns
+                ):
+                    crop_summary = (
+                        subplots_df["crop_code"]
+                        .value_counts()
+                        .rename_axis("Crop")
+                        .reset_index(name="Subplot Count")
+                    )
+
+                    st.dataframe(
+                        crop_summary,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("No crop subplots are registered.")
+
+                # Detailed registered subplot inventory.
+                st.markdown("#### 4. Detailed Subplot Inventory")
+
+                if not subplots_df.empty:
+                    st.dataframe(
+                        subplots_df,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                    st.download_button(
+                        label="Download Experimental Subplot Inventory (CSV)",
+                        data=subplots_df.to_csv(index=False).encode("utf-8"),
+                        file_name="TOKUMA_Experimental_Subplot_Inventory.csv",
+                        mime="text/csv",
+                    )
+                else:
+                    st.info("There are no subplot records to export.")
+
+                # Structural validation.
+                st.markdown("#### 5. Experimental Design Validation")
+
+                validation_result = experimental_inventory["validation"]
+
+                if validation_result["valid"]:
+                    st.success(
+                        "Experimental design structural validation passed."
+                    )
+                else:
+                    st.error(
+                        "Experimental design structural validation failed."
+                    )
+
+                    for validation_error in validation_result.get(
+                        "errors", []
+                    ):
+                        st.write(f"- {validation_error}")
+
+                # Sensor installation status.
+                st.markdown("#### 6. Sensor Deployment Status")
+
+                deployment_count = inventory_counts.get(
+                    "sensor_deployments", 0
+                )
+
+                st.metric(
+                    "Registered Sensor Deployments",
+                    deployment_count,
+                )
+
+                if deployment_count == 0:
+                    st.info(
+                        "No physical sensor deployments are currently "
+                        "registered. Sensor installation should only be "
+                        "recorded after actual field deployment is verified."
+                    )
+
+            except Exception as error:
+                st.error(
+                    "Unable to retrieve the experimental design inventory."
+                )
+                st.exception(error)
